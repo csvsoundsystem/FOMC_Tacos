@@ -5,13 +5,18 @@ from urlparse import urljoin
 import re
 from datetime import datetime
 import os
-
+import dataset
 
 ######################## SETUP VARIABLES ########################
 
 # Base URL definitions:
 YEARS_URL = 'http://www.federalreserve.gov/newsevents/press/monetary/'
 RELEASES_URL = 'http://www.federalreserve.gov/'
+
+# Database definition
+db = dataset.connect('sqlite:///frb_releases/federalreserve.db')
+table = db['press_releases']
+
 
 # Details for handling dates
 re_date = re.compile(r"(\w+)(?: ?- ?\d+)? (\d+), (\d+)")
@@ -38,24 +43,32 @@ annual_urls = [get_url_year(year) for year in years]
 
 # Take the list of annual URLs and extract the press release URLs for each year
 # Press releases for each year are saved into the urls list
-def cook_soup(url):
+def cook_soup(years_url):
 
-	response = requests.get(url)
+	response = requests.get(years_url)
+	#print response
 	soup = BeautifulSoup(response.content)
+	#print soup
 	urls = []
-	for link in soup.select("li div a"):
-		url_suffix = link.get('href')
+	titles = []
+	for link in soup.find_all('div', {'class':'indent'}):
+		a_tag = link.find('a')
+		url_suffix = a_tag.attrs['href']
+		title = a_tag.text
 		url_full = urljoin(RELEASES_URL, url_suffix)
 		urls.append(url_full)
-	#print(urls)
-	return urls
-			
-url_list = [cook_soup(u) for u in annual_urls]
-#print(url_list)
+		titles.append(title.encode('utf-8', 'ignore').strip())
+		#print "href:", url_suffix
+		#print "text:", title
 
+	return zip(urls, titles)
+
+url_list = [cook_soup(u) for u in annual_urls]
 
 # Parse the data from each press release URL
-def get_data(url):
+def get_data(i):
+	
+	url, title = i
 	print url
 
 	response = requests.get(url)
@@ -102,42 +115,29 @@ def get_data(url):
 	# ignore date paragraph
 		if not re_date.search(p.text):
 		# buld up a list of paragraphs
-			paragraphs.append(p.text.encode('utf-8').strip())
+			paragraphs.append(p.text.encode('utf-8', 'ignore').strip())
 
 	# Turn list of paragraphs into one string, but remove CRLFs
-	text = " ".join(paragraphs).replace("\n", " ")
+	text = " ".join(paragraphs) #.replace("\n", " ").replace("\r", " ")
 	
 	# Collect the data
 	data = {
 	'source_url': url,
+	'title': title,
+	'is_fomc': 1 if 'fomc statement' in title.lower() else 0,
 	'date': date_object,
 	'text': text
 	}
-	print(data)
-	return data
+	#print(data)
+	table.upsert(data, ['source_url'])
+
 
 # Save the data
 def save_data():
 
-	# Creates directory to save the data
-	save_dir = "frb_releases"
-	if not os.path.exists(save_dir):
-		os.mkdir(save_dir)
-
-	# Iterates each URL through get_data function and writes it to a CSV file
-	output = open(save_dir + "/" + "federal reserve.csv", "w")
-	delimiter = ","
-	# Attach headers to output CSV file
-	output.write(delimiter.join(["URL", "Date", "Text"]))
-	output.write("\n")
-	for urls in url_list:
-		for url in urls:
-			# Get the data
-			result = get_data(url)
-			# Write the data to the CSV file, with quotation mark text qualifiers
-			output.write(delimiter.join([str(result["source_url"]), str(result["date"]), "\"" + result["text"].replace("\"", "\"\"") + "\""]))
-			output.write("\n")
-	output.close()
-
+	for item in url_list:
+		for i in item:
+			get_data(i)
+		
 # Showtime
 save_data()
