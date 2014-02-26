@@ -6,6 +6,9 @@ import re
 from datetime import datetime
 import os
 import dataset
+from pprint import pprint
+from thready import threaded
+from atm import ATM
 
 ######################## SETUP VARIABLES ########################
 
@@ -15,8 +18,8 @@ RELEASES_URL = 'http://www.federalreserve.gov/'
 
 # Database definition
 db = dataset.connect('sqlite:///frb_releases/federalreserve.db')
-table = db['press_releases']
 
+teller = ATM('cache-dir')
 
 # Details for handling dates
 re_date = re.compile(r"(\w+)(?: ?- ?\d+)? (\d+), (\d+)")
@@ -39,31 +42,27 @@ def get_url_year(year):
 
 	return urljoin(YEARS_URL,str(year)+'monetary.htm')
 
-annual_urls = [get_url_year(year) for year in years]
-
 # Take the list of annual URLs and extract the press release URLs for each year
 # Press releases for each year are saved into the urls list
 def cook_soup(years_url):
-
-	response = requests.get(years_url)
+	print "YEAR: %s" % years_url
+	response = teller.get_cache(years_url)
 	#print response
 	soup = BeautifulSoup(response.content)
 	#print soup
-	urls = []
-	titles = []
+	items = []
 	for link in soup.find_all('div', {'class':'indent'}):
 		a_tag = link.find('a')
 		url_suffix = a_tag.attrs['href']
-		title = a_tag.text
 		url_full = urljoin(RELEASES_URL, url_suffix)
-		urls.append(url_full)
-		titles.append(title.encode('utf-8', 'ignore').strip())
-		#print "href:", url_suffix
-		#print "text:", title
+		
+		title = a_tag.text
+		
+		item = (url_full, title.encode('utf-8', 'ignore').strip())
+		
+		items.append(item)
 
-	return zip(urls, titles)
-
-url_list = [cook_soup(u) for u in annual_urls]
+	return items
 
 # Parse the data from each press release URL
 def get_data(i):
@@ -71,7 +70,7 @@ def get_data(i):
 	url, title = i
 	print url
 
-	response = requests.get(url)
+	response = teller.get_cache(url)
 	soup = BeautifulSoup(response.content)
 
 	if soup.find('p', {'id':'prContentDate'}):
@@ -104,8 +103,8 @@ def get_data(i):
 	#print raw_date, m.groups()
 	if m:
 		date_string = m.group(1).replace("Plan", "") + " " + m.group(2) + ", " + m.group(3)
-		#print date_string
 		date_object = datetime.strptime(date_string, date_format)
+
 	else:
 		date_object = None
 		print "ERROR parsing date: %s" % raw_date
@@ -115,29 +114,38 @@ def get_data(i):
 	# ignore date paragraph
 		if not re_date.search(p.text):
 		# buld up a list of paragraphs
-			paragraphs.append(p.text.encode('utf-8', 'ignore').strip())
+			text = p.text.encode('utf-8', 'ignore')
+			text = re.sub('\s{2,}', ' ', text).strip()
+			paragraphs.append(text)
 
 	# Turn list of paragraphs into one string, but remove CRLFs
 	text = " ".join(paragraphs) #.replace("\n", " ").replace("\r", " ")
 	
+	# determine if it's a fomc statement
+	is_fomc = 1 if 'fomc statement' in title.lower() else 0
+
 	# Collect the data
 	data = {
-	'source_url': url,
-	'title': title,
-	'is_fomc': 1 if 'fomc statement' in title.lower() else 0,
-	'date': date_object,
-	'text': text
+		'source_url': url,
+		'title': title,
+		'is_fomc': is_fomc,
+		'date': date_object,
+		'text': text
 	}
-	#print(data)
-	table.upsert(data, ['source_url'])
+
+	db['press_releases'].upsert(data, ['source_url'])
 
 
 # Save the data
-def save_data():
-
-	for item in url_list:
-		for i in item:
-			get_data(i)
+def run():
+	annual_urls = [get_url_year(year) for year in years]
+	url_list = [cook_soup(u) for u in annual_urls]
+	
+	# unnest
+	items = [i for item in url_list for i in item ]
+	
+	# thread that shit
+	threaded(items, get_data,  20, 200)
 		
 # Showtime
-save_data()
+run()

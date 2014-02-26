@@ -1,7 +1,7 @@
 #################
 ## Eclipse
 #################
-
+scraper/cache-dir/
 *.pydevproject
 .project
 .metadata
