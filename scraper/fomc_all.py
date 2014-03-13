@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from urlparse import urljoin
 import re
 from datetime import datetime
+from time import strftime
 import os
 import dataset
 from pprint import pprint
@@ -115,13 +116,12 @@ def get_data(i):
 	# Create a list of paragraphs with all the text for each press release
 	paragraphs = []
 	for p in soup.find_all('p'):
-	# Ignore date paragraph
-		if not re_date.search(p.text):
-		# build up a list of paragraphs
-			text = p.text.encode('utf-8', 'ignore')
-			# Sub out empty spaces that may cause prblems
-			text = re.sub('\s{2,}', ' ', text).strip()
-			paragraphs.append(text)
+		text = p.text.encode('utf-8', 'ignore')
+		# Sub out empty spaces that may cause prblems
+		text = re.sub('\s{2,}', ' ', text).strip()
+		# Sub out press release date paragraphs because we are storing them in separate column
+		text = re.sub('(Release Date ?:) (\w+)(?: ?- ?\d+)? (\d+), (\d+)',' ', text).strip()
+		paragraphs.append(text)
 
 	# Turn list of paragraphs into one string
 	text = " ".join(paragraphs) 
