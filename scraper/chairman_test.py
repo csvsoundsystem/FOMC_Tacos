@@ -20,7 +20,7 @@ YEARS_URL = 'http://www.federalreserve.gov/newsevents/press/monetary/'
 RELEASES_URL = 'http://www.federalreserve.gov/'
 
 # Database definition
-db = dataset.connect('sqlite:///frb_releases/federalreserve.db')
+db = dataset.connect('sqlite:///frb_releases/federalreserve_chairman.db')
 
 # Cache definition
 teller = ATM('cache-dir')
@@ -36,7 +36,7 @@ date_object = []
 
 # Define the year range for the press releases
 # Press releases start in 1996, end in 2014
-years = range(1996, 2015)
+years = range(2005, 2007)
 
 
 ######################### 	FUNCTIONS 	##########################
@@ -134,8 +134,9 @@ def get_data(i):
 
 	# Assign Federal Reserve Chairman:
 
-	Bernanke_date = datetime.strptime("2006-01-02", "%B %d, %Y")
+	Bernanke_date = datetime.strptime("2006-01-02", "%Y-%B-%d")
 	chairman = 'Greenspan' if date_object < Bernanke_date else None
+	chairman = 'Bernanke' if date_object > Bernanke_date else None
 
 	# Collect the data
 	data = {

@@ -4,7 +4,6 @@ from bs4 import BeautifulSoup
 from urlparse import urljoin
 import re
 from datetime import datetime
-from time import strftime
 import os
 import dataset
 from pprint import pprint
@@ -20,11 +19,11 @@ RELEASES_URL = 'http://www.federalreserve.gov/'
 # Database definition
 db = dataset.connect('sqlite:///frb_releases/federalreserve.db')
 
-# Cache definition
 teller = ATM('cache-dir')
 
 # Details for handling dates
 re_date = re.compile(r"(\w+)(?: ?- ?\d+)? (\d+), (\d+)")
+
 #OLD: (\w+) (\d+)(?: ?- ?\d+)?, (\d+)
 #NEW: (\w+)(?: ?- ?\d+)? (\d+), (\d+)
 #Former solution:
@@ -44,11 +43,10 @@ def get_url_year(year):
 
 	return urljoin(YEARS_URL,str(year)+'monetary.htm')
 
-
 # Take the list of annual URLs and extract the press release URLs for each year
 # Press releases for each year are saved into the urls list
 def cook_soup(years_url):
-	print "YEAR: %s" % years_url
+	#print "YEAR: %s" % years_url
 	response = teller.get_cache(years_url)
 	#print response
 	soup = BeautifulSoup(response.content)
@@ -76,7 +74,6 @@ def get_data(i):
 	response = teller.get_cache(url)
 	soup = BeautifulSoup(response.content)
 
-	# This gets the raw dates from the HTML of each press release
 	if soup.find('p', {'id':'prContentDate'}):
 		#This gets the press releases for HTML structure after 2006
 		raw_date = soup.find('p', {'id':'prContentDate'}).text
@@ -113,21 +110,31 @@ def get_data(i):
 		date_object = None
 		print "ERROR parsing date: %s" % raw_date
 
-	# Create a list of paragraphs with all the text for each press release
 	paragraphs = []
-	for p in soup.find_all('p'):
+	raw_paragraphs = []
+	for p in soup.find_all('p')[1:]:
+	# ignore date paragraph
+		raw_paragraphs.append(p.text)
+		
+		# buld up a list of paragraphs
 		text = p.text.encode('utf-8', 'ignore')
-		# Sub out empty spaces that may cause prblems
-		text = re.sub('\s{2,}', ' ', text).strip()
-		# Sub out press release date paragraphs because we are storing them in separate column
-		text = re.sub('(Release Date ?:) (\w+)(?: ?- ?\d+)? (\d+), (\d+)',' ', text).strip()
-		paragraphs.append(text)
+		text2 = re.sub('\s{2,}', ' ', text).strip()
+		paragraphs.append(text2)
+		#if text and not text2:
+			#print "ERROR: text=", text 
+		paragraphs.append(text2)
 
-	# Turn list of paragraphs into one string
-	text = " ".join(paragraphs) 
+	# tests if all paragraphs are blanks
+	#if not any(p for p in paragraphs):
+		#print("Error")
+		#import pprint
+		#pprint.pprint(raw_paragraphs)
+
+
+	# Turn list of paragraphs into one string, but remove CRLFs
+	text = " ".join(paragraphs) #.replace("\n", " ").replace("\r", " ")
 	
-	# Determine if the press release is an FOMC statement
-	# FOMC statements always say 'FOMC statement' in the title
+	# determine if it's a fomc statement
 	is_fomc = 1 if 'fomc statement' in title.lower() else 0
 
 	# Collect the data
@@ -139,19 +146,21 @@ def get_data(i):
 		'text': text
 	}
 
-	# Upsert the data into the SQL lite database by source_url
 	db['press_releases'].upsert(data, ['source_url'])
 
 
 # Save the data
 def run():
+	if os.path.exists('frb_releases/federalreserve.db'):
+		os.remove('frb_releases/federalreserve.db')
+
 	annual_urls = [get_url_year(year) for year in years]
 	url_list = [cook_soup(u) for u in annual_urls]
 	
-	# Unnest 
+	# unnest
 	items = [i for item in url_list for i in item ]
 	
-	# Thread the data collection
+	# thread that shit
 	threaded(items, get_data,  20, 200)
 		
 # Showtime
